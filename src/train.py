@@ -1,6 +1,7 @@
+import argparse
 import os
-import datasets
-from datasets import load_from_disk, DatasetDict
+
+from datasets import load_from_disk
 import torch
 import transformers
 from transformers import set_seed
@@ -14,87 +15,59 @@ from rewards import (
     type_reward,
 )
 
-from trainer.SLS_trainer_new import SLS_Trainer
-from datetime import datetime
-current_date = datetime.now().date()
-date_str = current_date.strftime("%m.%d")
-import time
+from trainer.sls_trainer import SLS_Trainer
 
 
-class SLS_Config:
-
-
-    # model args
-    model_name_or_path = '/mnt/bn/qishui-agent-llm/yangzheng/model/Qwen3-4B-Instruct-2507'
-    model_revision = 'main'
-    torch_dtype = 'bfloat16'
-    attn_implementation = 'flash_attention_2'
-    system_prompt = '''You are a helpful AI Assistant that provides detailed thought processes and correct answers. Please respond in the following format:
-<think>
-[Your step-by-step thinking process here]
-</think>
-<answer>
-[Your clear solution and answer here, with the answer in \\boxed{}]
-</answer>'''
-    system_prompt = '''You are a helpful AI assistant that provides detailed thought processes and correct answers. Your final answer must be placed within \\boxed{}.'''
-#     system_prompt = '''You are a helpful AI assistant that provides detailed thought processes and correct answers. Your final answer must be placed within \\boxed{}.
-# After answering, select the most appropriate category from: Algebra, Geometry, Number Theory, Combinatorics, Primary Math, Calculus, Logic and Puzzles, Inequalities, or Other. End your response strictly with: This is a [Category] question.'''
-
-
-    # train args
-    num_epochs = 1 # 训练轮数
-    save_steps = 50
-    dataset_name = '/mnt/bn/qishui-agent-llm/yangzheng/data/mingle32k-avg'
-    name = '/SLS/Qwen3-4B-Instruct-2507/lr/' + date_str + '/'
-    output_dir = '/mnt/bn/qishui-agent-llm/yangzheng/model' + name + '/'
-    save_checkpoint = False
-
-    
-    seed = 42
-    max_grad_norm = 1
-    num_processes = torch.cuda.device_count()
-    batch_size = 4
-    per_batch_size = batch_size//num_processes
-
-    #Adam
-    adam_beta1 = 0.9
-    adam_beta2 = 0.999
-    adam_epsilon = 1e-8
-    weight_decay = 0.0
-    lr = 5.0e-06
-    gradient_accumulation_steps = batch_size//num_processes
-    #vllm
-    use_vllm = True
-    vllm_dtype = 'bfloat16'
-    vllm_gpu_memory_utilization = 0.2
-    vllm_tensor_parallel_size = 1
-    vllm_device = 'auto'
-    vllm_per_batch_size = int(batch_size//num_processes * 2)
-    temperature = 1.0 # 采样温度
-
-    # data select
-    reward_top = 0.99 # 3.099
-    l = 2 # 3  # 标准差均值0.7304，最大值1.55，概率最高0.78
-    std_max = 0.5 # 1.55
-    
-    #rl args
-    sft_mini_batch_size = 1
-    rl_mini_batch_size = 4
-    rl_mode = 'gspo' # 'dapo','gspo'
-    num_generations = 4 # 组内样本数
-    max_prompt_length = 512 # 最大输入长度
-    max_rl_length = 8192 # 最大输出长度
-    reward_funcs = ["format", "accuracy_soft", 'accuracy'] # 奖励函数列表
-    reward_funcs = ["accuracy_soft"] # 奖励函数列表
-    reward_weights = [1.0] * len(reward_funcs) # 奖励的权重（多个奖励函数）
-    reward_num = len(reward_funcs)
-    # reward_num = 
-
-    # swanlab
-    project_name = 'SLS' # Name of your project
-    experiment_name = name       # A specific name for this run
-    log_mode = 'cloud' #'offline' #'local'# 'cloud' 
-    log_dir =output_dir
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Train SLS with dynamic SFT-RL weighting."
+    )
+    parser.add_argument("--model-name-or-path", required=True)
+    parser.add_argument("--dataset-name", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--attn-implementation", default="flash_attention_2")
+    parser.add_argument(
+        "--system-prompt",
+        default=(
+            "You are a helpful AI assistant that provides detailed thought processes "
+            "and correct answers. Your final answer must be placed within \\boxed{}."
+        ),
+    )
+    parser.add_argument("--num-epochs", type=int, default=1)
+    parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-grad-norm", type=float, default=1.0)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-epsilon", type=float, default=1e-8)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--learning-rate", dest="lr", type=float, default=5e-6)
+    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.2)
+    parser.add_argument("--vllm-tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--vllm-per-batch-size", type=int, default=2)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--reward-top", type=float, default=0.99)
+    parser.add_argument("--sls-lambda", dest="l", type=float, default=2.0)
+    parser.add_argument("--std-max", type=float, default=0.5)
+    parser.add_argument("--rl-mode", choices=("dapo", "gspo"), default="gspo")
+    parser.add_argument("--num-generations", type=int, default=4)
+    parser.add_argument("--max-prompt-length", type=int, default=512)
+    parser.add_argument("--max-rl-length", type=int, default=8192)
+    parser.add_argument("--reward-funcs", nargs="+", default=["accuracy_soft"])
+    parser.add_argument("--project-name", default="SLS")
+    parser.add_argument("--experiment-name", default="sls-training")
+    parser.add_argument(
+        "--log-mode",
+        choices=("cloud", "local", "offline", "disabled"),
+        default="offline",
+    )
+    parser.add_argument("--log-dir")
+    args = parser.parse_args()
+    args.reward_weights = [1.0] * len(args.reward_funcs)
+    args.reward_num = len(args.reward_funcs)
+    args.log_dir = args.log_dir or args.output_dir
+    return args
 
 
 def main(args):
@@ -130,7 +103,6 @@ def main(args):
         },
         num_proc=8,
     )
-    # import ipdb;ipdb.set_trace()
     def make_conversation(example):
         prompt = []
         if args.system_prompt is not None:
@@ -179,5 +151,4 @@ def main(args):
     trainer.save_model('all')
     
 if __name__ == "__main__":
-    args = SLS_Config()
-    main(args)
+    main(parse_args())

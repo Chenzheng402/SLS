@@ -190,7 +190,6 @@ def type_reward(completions, **kwargs):
     Optimized for robustness and readability.
     """
     # 1. 提取 targets，确保变量名清晰
-    # import ipdb; ipdb.set_trace()
     ground_truths = kwargs.get('problem_type', [])
     
     # 2. 预编译正则，避免在循环中重复编译 (提升效率)
