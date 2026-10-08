@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper."
+type: software
+title: "Sample Learning State Guided Dynamic SFT--RL Integration Post-training"
+version: 1.0.0
+date-released: 2026-10-08
+repository-code: "https://github.com/Chenzheng402/SLS"
+authors:
+  - given-names: Zheng
+    family-names: Yang
+  - given-names: Yilin
+    family-names: Liu
+  - given-names: Zhuoran
+    family-names: Li
+  - given-names: Wenhao
+    family-names: Gao
+  - given-names: Bingwei
+    family-names: Li
+  - given-names: Haozhe
+    family-names: Sun
+  - given-names: Caixia
+    family-names: Yuan
+  - given-names: Fan
+    family-names: Wan
+  - given-names: Chen
+    family-names: Wu
+  - given-names: Xiaojie
+    family-names: Wang
